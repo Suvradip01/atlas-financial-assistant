@@ -1,5 +1,6 @@
 # Environments
 .env
+.env.example
 .venv
 env/
 venv/
@@ -104,6 +105,7 @@ celerybeat.pid
 
 # Environments
 .env
+.env.example
 .venv
 env/
 venv/
