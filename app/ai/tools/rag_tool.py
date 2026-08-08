@@ -85,28 +85,47 @@ async def run_rag_pipeline(
         rewritten_query = user_question  # Fallback: use original.
 
     # ── Stage 2: Hybrid Retrieval ──────────────────────────────────────────────
-    embedding_model = model_router.get_model("query_embedding")
-    query_embedding = await llm.embed_single(rewritten_query, model=embedding_model)
+    # Detect summarization requests and retrieve more chunks
+    summary_keywords = ["summarize", "summary", "overview", "key points", "highlights", "main points"]
+    is_summary_request = any(keyword in user_question.lower() for keyword in summary_keywords)
+    
+    if is_summary_request:
+        # For summarization, retrieve all chunks without search
+        # Only use the most recent document (first in the list)
+        most_recent_doc_id = document_ids[0] if document_ids else None
+        if most_recent_doc_id:
+            all_chunks = await repo.get_chunks_by_document(most_recent_doc_id)
+            merged_chunks = all_chunks[:20]  # Limit to first 20 chunks for context window
+            logger.info("summary_request_detected", document_id=most_recent_doc_id, chunks_retrieved=len(merged_chunks))
+        else:
+            merged_chunks = []
+    else:
+        # Try vector search if embeddings are available, otherwise use BM25 only
+        vector_chunks = []
+        try:
+            embedding_model = model_router.get_model("query_embedding")
+            query_embedding = await llm.embed_single(rewritten_query, model=embedding_model)
+            vector_chunks = await repo.vector_search(
+                document_ids=document_ids,
+                query_embedding=query_embedding,
+                top_k=settings.rag_top_k_retrieval,
+            )
+        except Exception as exc:
+            logger.warning("vector_search_failed_fallback_to_bm25", exc_info=exc)
 
-    vector_chunks = await repo.vector_search(
-        document_ids=document_ids,
-        query_embedding=query_embedding,
-        top_k=settings.rag_top_k_retrieval,
-    )
+        bm25_chunks = await repo.full_text_search(
+            document_ids=document_ids,
+            query=rewritten_query,
+            top_k=10,
+        )
 
-    bm25_chunks = await repo.full_text_search(
-        document_ids=document_ids,
-        query=rewritten_query,
-        top_k=10,
-    )
-
-    # Merge: deduplicate by chunk ID, preserving vector results first.
-    seen_ids: set[int] = set()
-    merged_chunks = []
-    for chunk in vector_chunks + bm25_chunks:
-        if chunk.id not in seen_ids:
-            seen_ids.add(chunk.id)
-            merged_chunks.append(chunk)
+        # Merge: deduplicate by chunk ID, preserving vector results first.
+        seen_ids: set[int] = set()
+        merged_chunks = []
+        for chunk in vector_chunks + bm25_chunks:
+            if chunk.id not in seen_ids:
+                seen_ids.add(chunk.id)
+                merged_chunks.append(chunk)
 
     if not merged_chunks:
         return {

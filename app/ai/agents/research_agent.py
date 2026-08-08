@@ -225,7 +225,7 @@ class ResearchAgent(BaseAgent):
                 model=synthesis_model,
                 messages=[{"role": "user", "content": prompt}],
                 temperature=0.3,
-                max_tokens=800,
+                max_tokens=2000,
             )
         except Exception as exc:
             logger.error("research_synthesis_failed", exc_info=exc)

@@ -155,3 +155,18 @@ class DocumentRepository:
             .limit(top_k)
         )
         return list(result.scalars().all())
+
+    async def get_all_chunks(
+        self,
+        document_ids: list[int],
+    ) -> list[DocumentChunk]:
+        """Get all chunks for specified documents, ordered by chunk index."""
+        if not document_ids:
+            return []
+
+        result = await self._session.execute(
+            select(DocumentChunk)
+            .where(DocumentChunk.document_id.in_(document_ids))
+            .order_by(DocumentChunk.chunk_index)
+        )
+        return list(result.scalars().all())

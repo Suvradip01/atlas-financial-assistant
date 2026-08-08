@@ -12,6 +12,7 @@ Business logic (when to store, how to merge) lives in MemoryService.
 
 from __future__ import annotations
 
+import json
 from datetime import datetime, timezone
 from typing import Any
 
@@ -54,6 +55,17 @@ class MemoryRepository:
         the old one of the same type is marked deprecated, not deleted,
         so we have an audit trail.
         """
+        # Ensure embedding is a list of floats, not a string
+        if embedding is not None and isinstance(embedding, str):
+            try:
+                embedding = json.loads(embedding)
+                if not isinstance(embedding, list):
+                    embedding = list(embedding)
+                embedding = [float(x) for x in embedding]
+            except (json.JSONDecodeError, ValueError, TypeError) as exc:
+                logger.error("embedding_conversion_failed_in_repo", exc_info=exc)
+                embedding = None
+        
         # Deprecate existing active facts of the same type.
         await self._session.execute(
             update(MemoryFact)
@@ -100,6 +112,17 @@ class MemoryRepository:
         """Retrieve semantically relevant active memory facts via cosine similarity."""
         # pgvector cosine distance: 1 - similarity (lower = more similar).
         # Cast embedding to vector type for the operator.
+        
+        # Ensure query_embedding is a list of floats
+        if isinstance(query_embedding, str):
+            query_embedding = json.loads(query_embedding)
+            if not isinstance(query_embedding, list):
+                query_embedding = list(query_embedding)
+            query_embedding = [float(x) for x in query_embedding]
+        
+        # Use the pgvector SQLAlchemy operator properly
+        query_vector = Vector(query_embedding)
+        
         result = await self._session.execute(
             select(MemoryFact)
             .where(
@@ -108,7 +131,7 @@ class MemoryRepository:
                 MemoryFact.embedding.isnot(None),
             )
             .order_by(
-                MemoryFact.embedding.cosine_distance(query_embedding)
+                MemoryFact.embedding.cosine_distance(query_vector)
             )
             .limit(top_k)
         )

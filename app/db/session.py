@@ -49,6 +49,14 @@ def _get_engine() -> AsyncEngine:
             # PgBouncer in transaction mode does not support prepared statements.
             connect_args={"statement_cache_size": 0},
         )
+        
+        from sqlalchemy import event
+        from pgvector.asyncpg import register_vector
+        
+        @event.listens_for(_engine.sync_engine, "connect")
+        def receive_connect(dbapi_connection, connection_record):
+            dbapi_connection.run_async(register_vector)
+
         logger.info("database_engine_created", pool_size=settings.database_pool_size)
     return _engine
 

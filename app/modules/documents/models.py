@@ -52,7 +52,7 @@ class Document(Base):
     content_type: Mapped[str] = mapped_column(String(100), nullable=False)
     file_size_bytes: Mapped[int] = mapped_column(Integer, nullable=False)
     status: Mapped[DocumentStatus] = mapped_column(
-        Enum(DocumentStatus, name="document_status_enum"),
+        Enum(DocumentStatus, name="document_status_enum", create_type=False, values_callable=lambda obj: [e.value for e in obj]),
         nullable=False,
         default=DocumentStatus.UPLOADED,
     )
@@ -120,7 +120,7 @@ class Alert(Base):
     )
     symbol: Mapped[str] = mapped_column(String(50), nullable=False)
     condition: Mapped[AlertCondition] = mapped_column(
-        Enum(AlertCondition, name="alert_condition_enum"), nullable=False
+        Enum(AlertCondition, name="alert_condition_enum", create_type=False, values_callable=lambda obj: [e.value for e in obj]), nullable=False
     )
     threshold: Mapped[float | None] = mapped_column(Float, nullable=True)
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
@@ -153,7 +153,7 @@ class Integration(Base):
         Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
     )
     provider: Mapped[IntegrationProvider] = mapped_column(
-        Enum(IntegrationProvider, name="integration_provider_enum"), nullable=False
+        Enum(IntegrationProvider, name="integration_provider_enum", create_type=False, values_callable=lambda obj: [e.value for e in obj]), nullable=False
     )
     # Tokens encrypted at rest via Fernet (security.py)
     access_token_encrypted: Mapped[str] = mapped_column(Text, nullable=False)
@@ -226,7 +226,7 @@ class Reminder(Base):
     )
     related_entity: Mapped[str | None] = mapped_column(String(100), nullable=True)
     status: Mapped[ReminderStatus] = mapped_column(
-        Enum(ReminderStatus, name="reminder_status_enum"),
+        Enum(ReminderStatus, name="reminder_status_enum", create_type=False, values_callable=lambda obj: [e.value for e in obj]),
         nullable=False,
         default=ReminderStatus.PENDING,
     )

@@ -197,7 +197,7 @@ class OnboardingAgent(BaseAgent):
                 model=model,
                 messages=[{"role": "user", "content": prompt}],
                 temperature=0.7,
-                max_tokens=150,
+                max_tokens=1000,
             )
         except Exception as exc:
             logger.warning("onboarding_question_failed", slot=next_slot, exc_info=exc)

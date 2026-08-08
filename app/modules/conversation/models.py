@@ -23,6 +23,7 @@ from sqlalchemy import (
     ForeignKey,
     Index,
     Integer,
+    Boolean,
     String,
     Text,
     UniqueConstraint,
@@ -62,10 +63,10 @@ class WatchlistItem(Base):
     symbol: Mapped[str] = mapped_column(String(50), nullable=False)
     display_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
     entity_type: Mapped[EntityType] = mapped_column(
-        Enum(EntityType, name="entity_type_enum"), nullable=False, default=EntityType.PUBLIC
+        Enum(EntityType, name="entity_type_enum", create_type=False, values_callable=lambda obj: [e.value for e in obj]), nullable=False, default=EntityType.PUBLIC
     )
     source: Mapped[WatchlistSource] = mapped_column(
-        Enum(WatchlistSource, name="watchlist_source_enum"),
+        Enum(WatchlistSource, name="watchlist_source_enum", create_type=False, values_callable=lambda obj: [e.value for e in obj]),
         nullable=False,
         default=WatchlistSource.EXPLICIT,
     )
@@ -134,10 +135,10 @@ class Message(Base):
         index=True,
     )
     role: Mapped[MessageRole] = mapped_column(
-        Enum(MessageRole, name="message_role_enum"), nullable=False
+        Enum(MessageRole, name="message_role_enum", create_type=False, values_callable=lambda obj: [e.value for e in obj]), nullable=False
     )
     modality: Mapped[MessageModality] = mapped_column(
-        Enum(MessageModality, name="message_modality_enum"),
+        Enum(MessageModality, name="message_modality_enum", create_type=False, values_callable=lambda obj: [e.value for e in obj]),
         nullable=False,
         default=MessageModality.TEXT,
     )
@@ -150,7 +151,7 @@ class Message(Base):
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
     is_summarized: Mapped[bool] = mapped_column(
-        Integer, nullable=False, default=False
+        Boolean, nullable=False, default=False
     )
 
     conversation: Mapped[Conversation] = relationship(
@@ -203,7 +204,7 @@ class MemoryFact(Base):
     )
     confidence: Mapped[float] = mapped_column(Float, nullable=False, default=1.0)
     status: Mapped[FactStatus] = mapped_column(
-        Enum(FactStatus, name="fact_status_enum"),
+        Enum(FactStatus, name="fact_status_enum", create_type=False, values_callable=lambda obj: [e.value for e in obj]),
         nullable=False,
         default=FactStatus.ACTIVE,
     )

@@ -54,7 +54,9 @@ Given a user message and context, output a JSON object:
 - If the user just gave a one-word reply to a previous clarification, use the conversation history to understand context.
 
 ## Entity extraction:
-- Extract ticker symbols, company names, dates, and sector names from the message.
+- Extract ONLY specific company ticker symbols (AAPL, MSFT, GOOGL) and company names (Apple, Microsoft, Google).
+- DO NOT extract general sector/industry keywords as entities: AI, semiconductors, technology, software, hardware, healthcare, finance, energy, consumer, retail, etc.
+- DO NOT extract general financial terms as entities: earnings, news, filings, stocks, market, etc.
 - Normalize company names to likely tickers where obvious (Apple → AAPL).
 
 Output ONLY the JSON object. No explanation."""

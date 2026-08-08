@@ -62,17 +62,18 @@ async def load_context(
     summaries = await memory_service.get_recent_summaries(user.id, limit=3)
 
     # ── 6. Semantic facts (vector search — only when query is meaningful) ─────
+    # TEMPORARILY DISABLED to prevent embedding errors
     memory_facts: list[str] = []
-    if user_query and len(user_query.strip()) > 10:
-        try:
-            memory_facts = await memory_service.get_relevant_facts(
-                user_id=user.id,
-                query=user_query,
-                top_k=5,
-            )
-        except Exception as exc:
-            # Don't crash the turn if embedding fails — just skip semantic facts.
-            logger.warning("semantic_fact_retrieval_failed", user_id=user.id, exc_info=exc)
+    # if user_query and len(user_query.strip()) > 10:
+    #     try:
+    #         memory_facts = await memory_service.get_relevant_facts(
+    #             user_id=user.id,
+    #             query=user_query,
+    #             top_k=5,
+    #         )
+    #     except Exception as exc:
+    #         # Don't crash the turn if embedding fails — just skip semantic facts.
+    #         logger.warning("semantic_fact_retrieval_failed", user_id=user.id, exc_info=exc)
 
     logger.debug(
         "context_loaded",

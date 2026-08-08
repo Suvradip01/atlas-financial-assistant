@@ -50,7 +50,7 @@ class DocumentGraphBuilder:
             if conversation_id:
                 async with session_factory() as session:
                     convo_service = ConversationService(session)
-                    history = await convo_service.get_message_history(conversation_id, limit=3)
+                    history = await convo_service.get_message_history(conversation_id)
                     conversation_context = "\n".join(
                         f"{m['role'].upper()}: {m['content']}" for m in history
                     )
@@ -120,14 +120,12 @@ class DocumentGraphBuilder:
             if conversation_id:
                 async with session_factory() as session:
                     convo_service = ConversationService(session)
-                    await convo_service.add_message(
+                    await convo_service.save_user_message(
                         conversation_id=conversation_id,
-                        role="user",
                         content=state.get("raw_input", ""),
                     )
-                    await convo_service.add_message(
+                    await convo_service.save_assistant_message(
                         conversation_id=conversation_id,
-                        role="assistant",
                         content=answer,
                     )
 

@@ -17,6 +17,7 @@ from __future__ import annotations
 
 from functools import lru_cache
 from pathlib import Path
+from string import Formatter
 
 from app.core.config import get_settings
 from app.core.logging import get_logger
@@ -86,16 +87,25 @@ def get_prompt(
 
     if variables:
         try:
-            return template.format_map(variables)
-        except KeyError as exc:
+            # Use Python's formatter to identify actual variable names
+            formatter = Formatter()
+            # Get all field names from the template
+            field_names = {field_name for _, field_name, _, _ in formatter.parse(template) if field_name}
+            
+            # Only replace variables that are actually provided
+            result = template
+            for field_name in field_names:
+                if field_name in variables:
+                    result = result.replace(f"{{{field_name}}}", str(variables[field_name]))
+            
+            return result
+        except Exception as exc:
             logger.warning(
-                "prompt_variable_missing",
+                "prompt_rendering_failed",
                 template_path="/".join(path_parts),
-                missing_key=str(exc),
+                exc_info=exc,
             )
-            # Return the partially-rendered template rather than crashing —
-            # a missing variable produces a visible {key} in the output,
-            # which is easier to debug than an exception in a live chat.
+            # Return the original template on error
             return template
 
     return template

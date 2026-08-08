@@ -41,7 +41,16 @@ async def process_document(
     )
 
     async with get_db_session_context() as session:
+        from app.modules.users.repository import UserRepository
+        from app.integrations_clients.telegram_client import get_telegram_client
+        
         doc_service = DocumentService(session)
+        user_repo = UserRepository(session)
+        tg_client = get_telegram_client()
+        
+        # Get user's chat_id for notification
+        user = await user_repo.get_by_id(user_id)
+        chat_id = user.chat_id if user else None
 
         try:
             # Mark as processing.
@@ -74,6 +83,13 @@ async def process_document(
                 chunk_count=len(chunks),
             )
 
+            # Send success notification
+            if chat_id:
+                await tg_client.send_message(
+                    chat_id=chat_id,
+                    text=f"✅ Your document {filename} is ready! You can now ask questions about it.",
+                )
+
         except Exception as exc:
             error_msg = str(exc)[:500]
             logger.error(
@@ -85,5 +101,12 @@ async def process_document(
             try:
                 await doc_service.mark_failed(document_id, error_msg)
                 await session.commit()
+                
+                # Send failure notification
+                if chat_id:
+                    await tg_client.send_message(
+                        chat_id=chat_id,
+                        text=f"❌ Sorry, I couldn't process {filename}. Please try uploading it again.",
+                    )
             except Exception:
                 pass

@@ -89,13 +89,32 @@ class ModelRouter:
 
     def __init__(self) -> None:
         settings = get_settings()
-        self._tier_to_model: dict[ModelTier, str] = {
-            ModelTier.SMALL: settings.llm_model_small,
-            ModelTier.MEDIUM: settings.llm_model_medium,
-            ModelTier.LARGE: settings.llm_model_large,
-            ModelTier.VISION: settings.llm_model_vision,
-            ModelTier.EMBED: settings.embedding_model,
-        }
+        # Use provider-specific models for better rate limits and performance
+        if settings.llm_provider == "google":
+            self._tier_to_model: dict[ModelTier, str] = {
+                ModelTier.SMALL: settings.google_model_small,
+                ModelTier.MEDIUM: settings.google_model_medium,
+                ModelTier.LARGE: settings.google_model_large,
+                ModelTier.VISION: settings.google_model_vision,
+                ModelTier.EMBED: settings.google_embedding_model,
+            }
+        elif settings.llm_provider == "groq":
+            # Groq doesn't support embeddings - will use simple retrieval without embeddings
+            self._tier_to_model: dict[ModelTier, str] = {
+                ModelTier.SMALL: settings.groq_model_small,
+                ModelTier.MEDIUM: settings.groq_model_medium,
+                ModelTier.LARGE: settings.groq_model_large,
+                ModelTier.VISION: settings.groq_model_vision,
+                ModelTier.EMBED: settings.groq_embedding_model,  # Not actually used
+            }
+        else:
+            self._tier_to_model: dict[ModelTier, str] = {
+                ModelTier.SMALL: settings.llm_model_small,
+                ModelTier.MEDIUM: settings.llm_model_medium,
+                ModelTier.LARGE: settings.llm_model_large,
+                ModelTier.VISION: settings.llm_model_vision,
+                ModelTier.EMBED: settings.embedding_model,
+            }
 
     def get_model(self, task: str) -> str:
         """Return the model name for the given task.

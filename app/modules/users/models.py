@@ -43,17 +43,19 @@ class User(Base):
     __tablename__ = "users"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    telegram_chat_id: Mapped[int] = mapped_column(
+    # DB column is 'chat_id' — we keep the Python attribute name aligned.
+    chat_id: Mapped[int] = mapped_column(
         BigInteger, unique=True, nullable=False, index=True
     )
-    telegram_username: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    username: Mapped[str | None] = mapped_column(String(255), nullable=True)
     timezone: Mapped[str] = mapped_column(String(64), nullable=False, default="UTC")
     role: Mapped[str | None] = mapped_column(String(100), nullable=True)
     onboarding_status: Mapped[OnboardingStatus] = mapped_column(
-        Enum(OnboardingStatus, name="onboarding_status_enum"),
+        Enum(OnboardingStatus, name="onboarding_status_enum", create_type=False, values_callable=lambda obj: [e.value for e in obj]),
         nullable=False,
         default=OnboardingStatus.NOT_STARTED,
     )
+    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     # Onboarding slot-filling state — persisted so interrupts don't lose progress.
     onboarding_state: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
@@ -78,7 +80,7 @@ class User(Base):
     )
 
     def __repr__(self) -> str:
-        return f"<User id={self.id} chat_id={self.telegram_chat_id}>"
+        return f"<User id={self.id} chat_id={self.chat_id}>"
 
 
 class UserPreferences(Base):

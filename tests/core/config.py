@@ -54,10 +54,9 @@ class Settings(BaseSettings):
     redis_url: str = Field(default="redis://localhost:6379/0")
 
     # ── LLM / AI ─────────────────────────────────────────────────────────────
-    llm_provider: Literal["openai", "anthropic", "google", "groq"] = "openai"
+    llm_provider: Literal["openai", "anthropic", "google"] = "openai"
     openai_api_key: SecretStr | None = None
     google_api_key: SecretStr | None = None
-    groq_api_key: SecretStr | None = None
 
     # Model tiers — names resolved by ModelRouter, so switching providers
     # is a single env-var change, not a code change.
@@ -76,14 +75,6 @@ class Settings(BaseSettings):
     google_model_vision: str = "gemini-3-flash-preview"
     google_embedding_model: str = "text-embedding-004"
     google_embedding_dimensions: int = 768
-
-    # Groq models (fast inference)
-    groq_model_small: str = "llama-3.1-8b-instant"
-    groq_model_medium: str = "llama-3.3-70b-versatile"
-    groq_model_large: str = "llama-3.3-70b-versatile"
-    groq_model_vision: str = "llama-3.2-11b-vision-preview"
-    groq_embedding_model: str = "llama-3.1-8b-instant"
-    groq_embedding_dimensions: int = 4096
 
     # ── Financial Data ────────────────────────────────────────────────────────
     finnhub_api_key: SecretStr = Field(...)
@@ -119,7 +110,6 @@ class Settings(BaseSettings):
 
     # ── Whisper ───────────────────────────────────────────────────────────────
     whisper_api_key: SecretStr | None = None
-    whisper_provider: Literal["openai", "local"] = "local"
 
     @property
     def effective_whisper_api_key(self) -> SecretStr | None:

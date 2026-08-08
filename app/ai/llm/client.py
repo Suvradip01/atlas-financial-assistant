@@ -53,6 +53,16 @@ def _get_openai_client() -> AsyncOpenAI:
                 api_key=api_key,
                 base_url="https://generativelanguage.googleapis.com/v1beta/openai/"
             )
+        elif settings.llm_provider == "groq":
+            api_key = (
+                settings.groq_api_key.get_secret_value()
+                if settings.groq_api_key
+                else "not-set"
+            )
+            _client = AsyncOpenAI(
+                api_key=api_key,
+                base_url="https://api.groq.com/openai/v1"
+            )
         else:
             api_key = (
                 settings.openai_api_key.get_secret_value()
@@ -70,9 +80,9 @@ class LLMClient:
     """
 
     @retry(
-        retry=retry_if_exception_type((APIConnectionError, APIError)),
-        stop=stop_after_attempt(3),
-        wait=wait_exponential(multiplier=1, min=1, max=15),
+        retry=retry_if_exception_type((APIConnectionError, APIError, RateLimitError)),
+        stop=stop_after_attempt(5),
+        wait=wait_exponential(multiplier=2, min=2, max=60),
         reraise=True,
     )
     async def chat(
@@ -120,8 +130,9 @@ class LLMClient:
             )
             return content
         except RateLimitError as exc:
-            logger.warning("llm_rate_limit", model=model)
-            raise LLMError(f"LLM rate limit exceeded for model {model}") from exc
+            logger.warning("llm_rate_limit", model=model, exc_info=exc)
+            # Will be retried by the decorator
+            raise
         except (APIConnectionError, APIError) as exc:
             logger.warning("llm_api_error", model=model, exc_info=exc)
             raise LLMError(f"LLM API error: {exc}") from exc
@@ -152,9 +163,9 @@ class LLMClient:
             raise LLMError(f"LLM stream error: {exc}") from exc
 
     @retry(
-        retry=retry_if_exception_type((APIConnectionError, APIError)),
-        stop=stop_after_attempt(3),
-        wait=wait_exponential(multiplier=1, min=1, max=15),
+        retry=retry_if_exception_type((APIConnectionError, APIError, RateLimitError)),
+        stop=stop_after_attempt(5),
+        wait=wait_exponential(multiplier=2, min=2, max=60),
         reraise=True,
     )
     async def embed(
@@ -176,8 +187,28 @@ class LLMClient:
                 input=texts,
             )
             vectors = [item.embedding for item in response.data]
+            
+            # Ensure all embeddings are lists of floats, not strings
+            converted_vectors = []
+            for vector in vectors:
+                if isinstance(vector, str):
+                    import json
+                    try:
+                        vector = json.loads(vector)
+                        if not isinstance(vector, list):
+                            vector = list(vector)
+                        vector = [float(x) for x in vector]
+                    except (json.JSONDecodeError, ValueError, TypeError):
+                        logger.error("embedding_conversion_failed", vector_type=type(vector))
+                        vector = []
+                elif not isinstance(vector, list):
+                    vector = list(vector)
+                else:
+                    vector = [float(x) for x in vector]
+                converted_vectors.append(vector)
+            
             logger.debug("embeddings_generated", model=embedding_model, count=len(texts))
-            return vectors
+            return converted_vectors
         except (APIConnectionError, APIError, RateLimitError) as exc:
             raise LLMError(f"Embedding API error: {exc}") from exc
 

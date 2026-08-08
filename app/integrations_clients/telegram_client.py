@@ -108,16 +108,31 @@ class TelegramClient:
         parse_mode: str = "Markdown",
         disable_notification: bool = False,
     ) -> dict[str, Any]:
-        """Send a text message to a chat."""
-        result = await self._call(
-            "sendMessage",
-            {
-                "chat_id": chat_id,
-                "text": text[:4096],  # Telegram's message length limit
-                "parse_mode": parse_mode,
-                "disable_notification": disable_notification,
-            },
-        )
+        """Send a text message to a chat. Falls back to no parse mode on Markdown errors."""
+        try:
+            result = await self._call(
+                "sendMessage",
+                {
+                    "chat_id": chat_id,
+                    "text": text[:4096],  # Telegram's message length limit
+                    "parse_mode": parse_mode,
+                    "disable_notification": disable_notification,
+                },
+            )
+        except ExternalServiceError as exc:
+            # If it's a parse error, retry without parse_mode
+            if "can't parse entities" in str(exc).lower() and parse_mode:
+                logger.warning("markdown_parse_error_fallback", chat_id=chat_id)
+                result = await self._call(
+                    "sendMessage",
+                    {
+                        "chat_id": chat_id,
+                        "text": text[:4096],
+                        "disable_notification": disable_notification,
+                    },
+                )
+            else:
+                raise
         logger.debug("message_sent", chat_id=chat_id, text_length=len(text))
         return result  # type: ignore[return-value]
 

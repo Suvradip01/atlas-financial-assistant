@@ -115,13 +115,21 @@ class WorkflowRouter:
         self, normalized_input: str, user: User
     ) -> WorkflowDestination:
         """Classify the message into a workflow destination via LLM."""
+        # Programmatic check for summarization requests - force document_qa
+        summary_keywords = ["summarize", "summary", "overview", "key points", "highlights", "main points"];
+        if any(keyword in normalized_input.lower() for keyword in summary_keywords):
+            logger.info("summary_keyword_detected", forcing="document_qa")
+            return "document_qa"
+
         model = self._model_router.get_model("workflow_classification")
         onboarding_complete = user.onboarding_status.value in ("completed", "skipped")
+        has_active_thread = "false"  # Could be enhanced to check for active conversation threads
 
         prompt = get_prompt(
             "router/workflow_classification",
             user_message=normalized_input,
-            onboarding_complete=str(onboarding_complete).lower(),
+            onboarding_complete=onboarding_complete,
+            has_active_thread=has_active_thread,
         )
 
         try:

@@ -25,7 +25,7 @@ class UserRepository:
         """Fetch a user by their Telegram chat_id, eager-loading preferences."""
         result = await self._session.execute(
             select(User)
-            .where(User.telegram_chat_id == chat_id)
+            .where(User.chat_id == chat_id)
             .options(selectinload(User.preferences))
         )
         return result.scalar_one_or_none()
@@ -47,8 +47,8 @@ class UserRepository:
     ) -> User:
         """Create a new User and a default UserPreferences record."""
         user = User(
-            telegram_chat_id=chat_id,
-            telegram_username=username,
+            chat_id=chat_id,
+            username=username,
             timezone=timezone,
             onboarding_status=OnboardingStatus.NOT_STARTED,
         )

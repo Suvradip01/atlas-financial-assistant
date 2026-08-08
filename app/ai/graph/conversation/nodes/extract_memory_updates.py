@@ -78,13 +78,17 @@ async def extract_memory_updates(
         updates = []
 
     # Persist updates via MemoryService if we have a session and a user.
-    if updates and session and user_id:
-        try:
-            from app.modules.memory.service import MemoryService
-            memory_service = MemoryService(session)
-            await memory_service.apply_memory_updates(user_id, updates)
-        except Exception as exc:
-            logger.warning("memory_persist_failed", user_id=user_id, exc_info=exc)
+    # TEMPORARILY DISABLED to prevent embedding errors
+    # if updates and session and user_id:
+    #     try:
+    #         from app.modules.memory.service import MemoryService
+    #         memory_service = MemoryService(session)
+    #         await memory_service.apply_memory_updates(user_id, updates)
+    #     except Exception as exc:
+    #         logger.warning("memory_persist_failed", user_id=user_id, exc_info=exc)
+    #         # Rollback the session to prevent transaction errors
+    #         await session.rollback()
+    logger.info("memory_updates_skipped_temporarily", count=len(updates) if updates else 0)
 
     if updates:
         logger.info(

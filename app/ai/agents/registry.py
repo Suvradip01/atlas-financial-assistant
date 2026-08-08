@@ -140,6 +140,9 @@ def _register_all_agents(registry: AgentRegistry) -> None:
     from app.ai.agents.meeting_prep_agent import MeetingPrepAgent
     registry.register(MeetingPrepAgent)
 
+    from app.ai.agents.small_talk_agent import SmallTalkAgent
+    registry.register(SmallTalkAgent)
+
     logger.info(
         "agent_registry_populated",
         capabilities=registry.list_capabilities(),

@@ -90,6 +90,18 @@ class MemoryService:
         embedding_model = self._model_router.get_model("memory_embedding")
         embedding = await self._llm.embed_single(fact_value, model=embedding_model)
 
+        # Ensure embedding is a list of floats, not a string
+        if isinstance(embedding, str):
+            try:
+                import json
+                embedding = json.loads(embedding)
+                if not isinstance(embedding, list):
+                    embedding = list(embedding)
+                embedding = [float(x) for x in embedding]
+            except (json.JSONDecodeError, ValueError, TypeError) as exc:
+                logger.error("embedding_conversion_failed", exc_info=exc)
+                embedding = None
+
         fact = await self._repo.upsert_fact(
             user_id=user_id,
             fact_type=fact_type,
@@ -142,6 +154,17 @@ class MemoryService:
         """
         embedding_model = self._model_router.get_model("query_embedding")
         query_embedding = await self._llm.embed_single(query, model=embedding_model)
+
+        # Ensure query_embedding is a list of floats, not a string
+        if isinstance(query_embedding, str):
+            try:
+                query_embedding = json.loads(query_embedding)
+                if not isinstance(query_embedding, list):
+                    query_embedding = list(query_embedding)
+                query_embedding = [float(x) for x in query_embedding]
+            except (json.JSONDecodeError, ValueError, TypeError) as exc:
+                logger.error("query_embedding_conversion_failed", exc_info=exc)
+                return []
 
         facts = await self._repo.semantic_search_facts(
             user_id=user_id,

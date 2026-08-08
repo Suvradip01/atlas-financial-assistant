@@ -77,6 +77,7 @@ class DocumentIngestionPipeline:
         )
 
         # ── Stage 3: Embed ─────────────────────────────────────────────────────
+        # Try embeddings if available, otherwise proceed without them
         embedding_model = self._model_router.get_model("document_embedding")
         texts = [c["content"] for c in raw_chunks]
         embeddings = await self._embed_batch(texts, embedding_model)
@@ -89,7 +90,7 @@ class DocumentIngestionPipeline:
                 "content": chunk["content"],
                 "page_number": chunk.get("page_number"),
                 "section_title": chunk.get("section_title"),
-                "embedding": embedding,
+                "embedding": embedding,  # Will be None if embedding failed
                 "token_count": chunk.get("token_count", 0),
             })
 
@@ -114,15 +115,34 @@ class DocumentIngestionPipeline:
             return [{"text": text, "page_number": None}]
 
     def _parse_pdf(self, file_bytes: bytes) -> list[dict[str, Any]]:
-        """Extract text from PDF using pdfplumber."""
+        """Extract text from PDF using pdfplumber with enhanced extraction."""
         try:
             import pdfplumber
             pages = []
             with pdfplumber.open(io.BytesIO(file_bytes)) as pdf:
                 for page_num, page in enumerate(pdf.pages, start=1):
                     text = page.extract_text() or ""
+                    
+                    # Try extracting tables for better content capture
+                    tables = page.extract_tables()
+                    if tables:
+                        for table in tables:
+                            if table:
+                                table_text = "\n".join(
+                                    " | ".join(str(cell) if cell else "" for cell in row)
+                                    for row in table
+                                )
+                                text += "\n\n" + table_text
+                    
+                    # If still very little text, try alternative extraction
+                    if len(text.strip()) < 100:
+                        # Try extracting text with layout preservation
+                        text = page.extract_text(x_tolerance=2, y_tolerance=2) or ""
+                    
                     if text.strip():
                         pages.append({"text": text, "page_number": page_num})
+            
+            logger.info("pdf_parse_complete", pages=len(pages), total_chars=sum(len(p["text"]) for p in pages))
             return pages
         except Exception as exc:
             logger.error("pdf_parse_failed", exc_info=exc)

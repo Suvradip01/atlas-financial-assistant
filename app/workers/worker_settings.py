@@ -31,6 +31,7 @@ def _get_redis_settings() -> RedisSettings:
         port=parsed.port or 6379,
         password=parsed.password,
         database=int(parsed.path.lstrip("/") or 0),
+        ssl=True if parsed.scheme == "rediss" else False,
     )
 
 
@@ -39,6 +40,10 @@ async def startup(ctx: dict) -> None:
     configure_logging()
     logger = get_logger(__name__)
     logger.info("arq_worker_started")
+
+    # CRITICAL: Import all ORM models first so SQLAlchemy can resolve all
+    # relationship() string references before any mapper is used.
+    import app.db.models  # noqa: F401
 
     from app.infra.redis_client import get_redis
     ctx["redis"] = await get_redis()

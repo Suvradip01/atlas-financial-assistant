@@ -18,6 +18,10 @@ from typing import AsyncGenerator
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+# CRITICAL: Import all ORM models first so SQLAlchemy can resolve all
+# relationship() string references before any mapper is used.
+import app.db.models  # noqa: F401
+
 from app.api.v1.router import router as api_v1_router
 from app.core.config import get_settings
 from app.core.logging import configure_logging, get_logger
