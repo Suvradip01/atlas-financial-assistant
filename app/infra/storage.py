@@ -108,6 +108,66 @@ class LocalStorageBackend(StorageBackend):
             logger.warning("file_delete_failed", storage_path=storage_path, exc_info=exc)
 
 
+class CloudinaryStorageBackend(StorageBackend):
+    """Cloudinary cloud storage backend.
+    
+    The storage_path returned is the secure_url from Cloudinary.
+    """
+
+    async def save(
+        self, data: bytes, content_type: str, extension: str = ""
+    ) -> str:
+        import asyncio
+        import cloudinary.uploader
+        
+        try:
+            response = await asyncio.to_thread(
+                cloudinary.uploader.upload,
+                data,
+                resource_type="auto"
+            )
+            secure_url = response.get("secure_url", "")
+            logger.info("cloudinary_file_saved", public_id=response.get("public_id"))
+            return secure_url
+        except Exception as exc:
+            logger.error("cloudinary_save_failed", exc_info=exc)
+            raise StorageError(f"Failed to save file to Cloudinary: {exc}") from exc
+
+    async def load(self, storage_path: str) -> bytes:
+        import httpx
+        
+        if not storage_path.startswith("http"):
+            raise StorageError("Invalid Cloudinary storage path (expected URL)")
+            
+        try:
+            async with httpx.AsyncClient(follow_redirects=True) as client:
+                response = await client.get(storage_path)
+                response.raise_for_status()
+                return response.content
+        except Exception as exc:
+            logger.error("cloudinary_load_failed", url=storage_path, exc_info=exc)
+            raise StorageError(f"Failed to load file from Cloudinary: {exc}") from exc
+
+    async def delete(self, storage_path: str) -> None:
+        import asyncio
+        import re
+        import cloudinary.uploader
+        
+        match = re.search(r'/upload/(?:v\d+/)?([^/]+)(?:\.\w+)?$', storage_path)
+        if not match:
+            logger.warning("cloudinary_delete_skipped", reason="could not extract public_id", url=storage_path)
+            return
+            
+        public_id = match.group(1)
+        try:
+            # We try both image and raw resource types as cloudinary separates them.
+            await asyncio.to_thread(cloudinary.uploader.destroy, public_id, resource_type="image")
+            await asyncio.to_thread(cloudinary.uploader.destroy, public_id, resource_type="raw")
+            logger.info("cloudinary_file_deleted", public_id=public_id)
+        except Exception as exc:
+            logger.warning("cloudinary_delete_failed", public_id=public_id, exc_info=exc)
+
+
 def _mime_to_ext(content_type: str) -> str:
     """Return a sensible file extension for a given MIME type."""
     mapping: dict[str, str] = {
@@ -135,10 +195,18 @@ def get_storage() -> StorageBackend:
         settings = get_settings()
         if settings.storage_backend == "local":
             _storage = LocalStorageBackend(settings.storage_local_path)
+        elif settings.storage_backend == "cloudinary":
+            import cloudinary
+            cloudinary.config(
+                cloud_name=settings.cloudinary_cloud_name,
+                api_key=settings.cloudinary_api_key,
+                api_secret=settings.cloudinary_api_secret.get_secret_value() if settings.cloudinary_api_secret else None
+            )
+            _storage = CloudinaryStorageBackend()
         else:
             raise NotImplementedError(
                 "S3 storage backend is not implemented in the hackathon build. "
-                "Set STORAGE_BACKEND=local."
+                "Set STORAGE_BACKEND=local or cloudinary."
             )
     return _storage
 

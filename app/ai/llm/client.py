@@ -43,12 +43,23 @@ def _get_openai_client() -> AsyncOpenAI:
     global _client  # noqa: PLW0603
     if _client is None:
         settings = get_settings()
-        api_key = (
-            settings.openai_api_key.get_secret_value()
-            if settings.openai_api_key
-            else "not-set"
-        )
-        _client = AsyncOpenAI(api_key=api_key)
+        if settings.llm_provider == "google":
+            api_key = (
+                settings.google_api_key.get_secret_value()
+                if settings.google_api_key
+                else "not-set"
+            )
+            _client = AsyncOpenAI(
+                api_key=api_key,
+                base_url="https://generativelanguage.googleapis.com/v1beta/openai/"
+            )
+        else:
+            api_key = (
+                settings.openai_api_key.get_secret_value()
+                if settings.openai_api_key
+                else "not-set"
+            )
+            _client = AsyncOpenAI(api_key=api_key)
     return _client
 
 

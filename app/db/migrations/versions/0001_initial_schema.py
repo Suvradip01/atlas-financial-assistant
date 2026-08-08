@@ -1,23 +1,17 @@
 """Initial schema migration — all tables.
 
 Revision ID: 0001_initial_schema
-Revises: 
+Revises:
 Create Date: 2026-08-05 00:00:00.000000
 
-Creates the full Atlas schema including:
-- pgvector extension
-- users, user_preferences
-- watchlist_items, conversations, messages, conversation_summaries
-- memory_facts, research_history
-- documents, document_chunks (with pgvector index)
-- alerts, integrations, notifications_log, reminders
+Creates the full Atlas schema using raw SQL for maximum compatibility
+with Supabase PgBouncer (transaction mode) which does not support
+prepared statements. All DDL is idempotent (IF NOT EXISTS).
 """
 
 from __future__ import annotations
 
-import sqlalchemy as sa
 from alembic import op
-from sqlalchemy.dialects import postgresql
 
 # revision identifiers
 revision: str = "0001_initial_schema"
@@ -27,28 +21,29 @@ depends_on: str | None = None
 
 
 def upgrade() -> None:
-    # ── Extensions ────────────────────────────────────────────────────────────
+    # ── Extensions ─────────────────────────────────────────────────────────────
     op.execute("CREATE EXTENSION IF NOT EXISTS vector")
     op.execute("CREATE EXTENSION IF NOT EXISTS pg_trgm")
 
-    # ── Enum types ────────────────────────────────────────────────────────────
+    # ── Enum types (idempotent) ─────────────────────────────────────────────────
     op.execute("""
         DO $$ BEGIN
-            CREATE TYPE onboarding_status_enum AS ENUM ('not_started', 'in_progress', 'completed', 'skipped');
+            CREATE TYPE onboarding_status_enum AS ENUM
+                ('not_started', 'in_progress', 'completed', 'skipped');
         EXCEPTION WHEN duplicate_object THEN NULL;
         END $$
     """)
     op.execute("""
         DO $$ BEGIN
-            CREATE TYPE document_status_enum AS ENUM ('uploaded', 'processing', 'ready', 'failed');
+            CREATE TYPE document_status_enum AS ENUM
+                ('uploaded', 'processing', 'ready', 'failed');
         EXCEPTION WHEN duplicate_object THEN NULL;
         END $$
     """)
     op.execute("""
         DO $$ BEGIN
-            CREATE TYPE alert_condition_enum AS ENUM (
-                'pct_move', 'price_above', 'price_below', 'filing', 'earnings', 'news'
-            );
+            CREATE TYPE alert_condition_enum AS ENUM
+                ('pct_move', 'price_above', 'price_below', 'filing', 'earnings', 'news');
         EXCEPTION WHEN duplicate_object THEN NULL;
         END $$
     """)
@@ -65,267 +60,231 @@ def upgrade() -> None:
         END $$
     """)
 
-    # ── users ─────────────────────────────────────────────────────────────────
-    op.create_table(
-        "users",
-        sa.Column("id", sa.Integer(), autoincrement=True, nullable=False),
-        sa.Column("chat_id", sa.BigInteger(), nullable=False),
-        sa.Column("username", sa.String(100), nullable=True),
-        sa.Column("role", sa.String(100), nullable=True),
-        sa.Column(
-            "onboarding_status",
-            sa.Enum(
-                "not_started", "in_progress", "completed", "skipped",
-                name="onboarding_status_enum",
-                create_type=False,
-            ),
-            nullable=False,
-            server_default="not_started",
-        ),
-        sa.Column("is_active", sa.Boolean(), nullable=False, server_default="true"),
-        sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
-        sa.Column("updated_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
-        sa.PrimaryKeyConstraint("id"),
-    )
-    op.create_index("ix_users_chat_id", "users", ["chat_id"], unique=True)
+    # ── users ───────────────────────────────────────────────────────────────────
+    op.execute("""
+        CREATE TABLE IF NOT EXISTS users (
+            id          SERIAL PRIMARY KEY,
+            chat_id     BIGINT NOT NULL,
+            username    VARCHAR(100),
+            role        VARCHAR(100),
+            onboarding_status onboarding_status_enum NOT NULL DEFAULT 'not_started',
+            is_active   BOOLEAN NOT NULL DEFAULT TRUE,
+            created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            updated_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        )
+    """)
+    op.execute("CREATE UNIQUE INDEX IF NOT EXISTS ix_users_chat_id ON users (chat_id)")
 
-    # ── user_preferences ──────────────────────────────────────────────────────
-    op.create_table(
-        "user_preferences",
-        sa.Column("id", sa.Integer(), autoincrement=True, nullable=False),
-        sa.Column("user_id", sa.Integer(), sa.ForeignKey("users.id", ondelete="CASCADE"), nullable=False),
-        sa.Column("timezone", sa.String(50), nullable=True, server_default="UTC"),
-        sa.Column("brief_time", sa.String(10), nullable=True, server_default="07:00"),
-        sa.Column("followed_sectors", postgresql.ARRAY(sa.String(100)), nullable=True),
-        sa.Column("risk_tolerance", sa.String(50), nullable=True),
-        sa.Column("preferred_currency", sa.String(10), nullable=True, server_default="USD"),
-        sa.PrimaryKeyConstraint("id"),
-    )
-    op.create_index("ix_user_preferences_user_id", "user_preferences", ["user_id"], unique=True)
+    # ── user_preferences ────────────────────────────────────────────────────────
+    op.execute("""
+        CREATE TABLE IF NOT EXISTS user_preferences (
+            id                  SERIAL PRIMARY KEY,
+            user_id             INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+            timezone            VARCHAR(50) DEFAULT 'UTC',
+            brief_time          VARCHAR(10) DEFAULT '07:00',
+            followed_sectors    TEXT[],
+            risk_tolerance      VARCHAR(50),
+            preferred_currency  VARCHAR(10) DEFAULT 'USD'
+        )
+    """)
+    op.execute("CREATE UNIQUE INDEX IF NOT EXISTS ix_user_preferences_user_id ON user_preferences (user_id)")
 
-    # ── watchlist_items ───────────────────────────────────────────────────────
-    op.create_table(
-        "watchlist_items",
-        sa.Column("id", sa.Integer(), autoincrement=True, nullable=False),
-        sa.Column("user_id", sa.Integer(), sa.ForeignKey("users.id", ondelete="CASCADE"), nullable=False),
-        sa.Column("symbol", sa.String(20), nullable=False),
-        sa.Column("added_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
-        sa.PrimaryKeyConstraint("id"),
-        sa.UniqueConstraint("user_id", "symbol", name="uq_watchlist_user_symbol"),
-    )
-    op.create_index("ix_watchlist_items_user_id", "watchlist_items", ["user_id"])
+    # ── watchlist_items ─────────────────────────────────────────────────────────
+    op.execute("""
+        CREATE TABLE IF NOT EXISTS watchlist_items (
+            id         SERIAL PRIMARY KEY,
+            user_id    INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+            symbol     VARCHAR(20) NOT NULL,
+            added_at   TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            CONSTRAINT uq_watchlist_user_symbol UNIQUE (user_id, symbol)
+        )
+    """)
+    op.execute("CREATE INDEX IF NOT EXISTS ix_watchlist_items_user_id ON watchlist_items (user_id)")
 
-    # ── conversations ─────────────────────────────────────────────────────────
-    op.create_table(
-        "conversations",
-        sa.Column("id", sa.Integer(), autoincrement=True, nullable=False),
-        sa.Column("user_id", sa.Integer(), sa.ForeignKey("users.id", ondelete="CASCADE"), nullable=False),
-        sa.Column("started_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
-        sa.Column("last_message_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
-        sa.Column("message_count", sa.Integer(), nullable=False, server_default="0"),
-        sa.Column("is_active", sa.Boolean(), nullable=False, server_default="true"),
-        sa.PrimaryKeyConstraint("id"),
-    )
-    op.create_index("ix_conversations_user_id", "conversations", ["user_id"])
+    # ── conversations ───────────────────────────────────────────────────────────
+    op.execute("""
+        CREATE TABLE IF NOT EXISTS conversations (
+            id              SERIAL PRIMARY KEY,
+            user_id         INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+            started_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            last_message_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            message_count   INTEGER NOT NULL DEFAULT 0,
+            is_active       BOOLEAN NOT NULL DEFAULT TRUE
+        )
+    """)
+    op.execute("CREATE INDEX IF NOT EXISTS ix_conversations_user_id ON conversations (user_id)")
 
-    # ── messages ──────────────────────────────────────────────────────────────
-    op.create_table(
-        "messages",
-        sa.Column("id", sa.Integer(), autoincrement=True, nullable=False),
-        sa.Column("conversation_id", sa.Integer(), sa.ForeignKey("conversations.id", ondelete="CASCADE"), nullable=False),
-        sa.Column("role", sa.String(20), nullable=False),
-        sa.Column("content", sa.Text(), nullable=False),
-        sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
-        sa.Column("token_count", sa.Integer(), nullable=True),
-        sa.PrimaryKeyConstraint("id"),
-    )
-    op.create_index("ix_messages_conversation_id", "messages", ["conversation_id"])
+    # ── messages ────────────────────────────────────────────────────────────────
+    op.execute("""
+        CREATE TABLE IF NOT EXISTS messages (
+            id              SERIAL PRIMARY KEY,
+            conversation_id INTEGER NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
+            role            VARCHAR(20) NOT NULL,
+            content         TEXT NOT NULL,
+            created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            token_count     INTEGER
+        )
+    """)
+    op.execute("CREATE INDEX IF NOT EXISTS ix_messages_conversation_id ON messages (conversation_id)")
 
-    # ── conversation_summaries ────────────────────────────────────────────────
-    op.create_table(
-        "conversation_summaries",
-        sa.Column("id", sa.Integer(), autoincrement=True, nullable=False),
-        sa.Column("conversation_id", sa.Integer(), sa.ForeignKey("conversations.id", ondelete="CASCADE"), nullable=False),
-        sa.Column("summary_text", sa.Text(), nullable=False),
-        sa.Column("covered_up_to_message_id", sa.Integer(), nullable=False),
-        sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
-        sa.PrimaryKeyConstraint("id"),
-    )
-    op.create_index("ix_conversation_summaries_conversation_id", "conversation_summaries", ["conversation_id"])
+    # ── conversation_summaries ──────────────────────────────────────────────────
+    op.execute("""
+        CREATE TABLE IF NOT EXISTS conversation_summaries (
+            id                        SERIAL PRIMARY KEY,
+            conversation_id           INTEGER NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
+            summary_text              TEXT NOT NULL,
+            covered_up_to_message_id  INTEGER NOT NULL,
+            created_at                TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        )
+    """)
+    op.execute("CREATE INDEX IF NOT EXISTS ix_conversation_summaries_conversation_id ON conversation_summaries (conversation_id)")
 
-    # ── memory_facts ──────────────────────────────────────────────────────────
-    op.create_table(
-        "memory_facts",
-        sa.Column("id", sa.Integer(), autoincrement=True, nullable=False),
-        sa.Column("user_id", sa.Integer(), sa.ForeignKey("users.id", ondelete="CASCADE"), nullable=False),
-        sa.Column("fact", sa.Text(), nullable=False),
-        sa.Column("embedding", postgresql.ARRAY(sa.Float()), nullable=True),  # stored as ARRAY, queried with pgvector cast
-        sa.Column("source", sa.String(100), nullable=True),
-        sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
-        sa.PrimaryKeyConstraint("id"),
-    )
-    op.create_index("ix_memory_facts_user_id", "memory_facts", ["user_id"])
+    # ── memory_facts ────────────────────────────────────────────────────────────
+    op.execute("""
+        CREATE TABLE IF NOT EXISTS memory_facts (
+            id          SERIAL PRIMARY KEY,
+            user_id     INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+            fact        TEXT NOT NULL,
+            embedding   FLOAT[],
+            source      VARCHAR(100),
+            created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        )
+    """)
+    op.execute("CREATE INDEX IF NOT EXISTS ix_memory_facts_user_id ON memory_facts (user_id)")
 
-    # ── research_history ──────────────────────────────────────────────────────
-    op.create_table(
-        "research_history",
-        sa.Column("id", sa.Integer(), autoincrement=True, nullable=False),
-        sa.Column("user_id", sa.Integer(), sa.ForeignKey("users.id", ondelete="CASCADE"), nullable=False),
-        sa.Column("query", sa.Text(), nullable=False),
-        sa.Column("entities", postgresql.ARRAY(sa.String(50)), nullable=True),
-        sa.Column("response_summary", sa.Text(), nullable=True),
-        sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
-        sa.PrimaryKeyConstraint("id"),
-    )
-    op.create_index("ix_research_history_user_id", "research_history", ["user_id"])
+    # ── research_history ────────────────────────────────────────────────────────
+    op.execute("""
+        CREATE TABLE IF NOT EXISTS research_history (
+            id               SERIAL PRIMARY KEY,
+            user_id          INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+            query            TEXT NOT NULL,
+            entities         TEXT[],
+            response_summary TEXT,
+            created_at       TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        )
+    """)
+    op.execute("CREATE INDEX IF NOT EXISTS ix_research_history_user_id ON research_history (user_id)")
 
-    # ── documents ─────────────────────────────────────────────────────────────
-    op.create_table(
-        "documents",
-        sa.Column("id", sa.Integer(), autoincrement=True, nullable=False),
-        sa.Column("user_id", sa.Integer(), sa.ForeignKey("users.id", ondelete="CASCADE"), nullable=False),
-        sa.Column("filename", sa.String(500), nullable=False),
-        sa.Column("storage_path", sa.String(1000), nullable=False),
-        sa.Column("content_type", sa.String(100), nullable=False),
-        sa.Column("file_size_bytes", sa.Integer(), nullable=False),
-        sa.Column(
-            "status",
-            sa.Enum(
-                "uploaded", "processing", "ready", "failed",
-                name="document_status_enum",
-                create_type=False,
-            ),
-            nullable=False,
-            server_default="uploaded",
-        ),
-        sa.Column("error_message", sa.Text(), nullable=True),
-        sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
-        sa.Column("processed_at", sa.DateTime(timezone=True), nullable=True),
-        sa.PrimaryKeyConstraint("id"),
-    )
-    op.create_index("ix_documents_user_id", "documents", ["user_id"])
+    # ── documents ───────────────────────────────────────────────────────────────
+    op.execute("""
+        CREATE TABLE IF NOT EXISTS documents (
+            id               SERIAL PRIMARY KEY,
+            user_id          INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+            filename         VARCHAR(500) NOT NULL,
+            storage_path     VARCHAR(1000) NOT NULL,
+            content_type     VARCHAR(100) NOT NULL,
+            file_size_bytes  INTEGER NOT NULL,
+            status           document_status_enum NOT NULL DEFAULT 'uploaded',
+            error_message    TEXT,
+            created_at       TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            processed_at     TIMESTAMPTZ
+        )
+    """)
+    op.execute("CREATE INDEX IF NOT EXISTS ix_documents_user_id ON documents (user_id)")
 
-    # ── document_chunks (with pgvector) ───────────────────────────────────────
-    op.create_table(
-        "document_chunks",
-        sa.Column("id", sa.Integer(), autoincrement=True, nullable=False),
-        sa.Column("document_id", sa.Integer(), sa.ForeignKey("documents.id", ondelete="CASCADE"), nullable=False),
-        sa.Column("chunk_index", sa.Integer(), nullable=False),
-        sa.Column("content", sa.Text(), nullable=False),
-        sa.Column("page_number", sa.Integer(), nullable=True),
-        sa.Column("section_title", sa.String(500), nullable=True),
-        sa.Column("embedding", sa.Text(), nullable=True),  # stored as vector(1536)
-        sa.Column("token_count", sa.Integer(), nullable=False, server_default="0"),
-        sa.PrimaryKeyConstraint("id"),
-    )
-    op.create_index("ix_document_chunks_document_id", "document_chunks", ["document_id"])
-    # Proper vector column and IVFFlat index added below via raw SQL.
-    op.execute("ALTER TABLE document_chunks ALTER COLUMN embedding TYPE vector(1536) USING NULL")
-    op.execute(
-        "CREATE INDEX IF NOT EXISTS ix_document_chunks_embedding "
-        "ON document_chunks USING ivfflat (embedding vector_cosine_ops) WITH (lists = 100)"
-    )
-    # Full-text search index on content for BM25-style retrieval.
-    op.execute(
-        "CREATE INDEX IF NOT EXISTS ix_document_chunks_fts "
-        "ON document_chunks USING gin(to_tsvector('english', content))"
-    )
+    # ── document_chunks (with pgvector) ────────────────────────────────────────
+    op.execute("""
+        CREATE TABLE IF NOT EXISTS document_chunks (
+            id             SERIAL PRIMARY KEY,
+            document_id    INTEGER NOT NULL REFERENCES documents(id) ON DELETE CASCADE,
+            chunk_index    INTEGER NOT NULL,
+            content        TEXT NOT NULL,
+            page_number    INTEGER,
+            section_title  VARCHAR(500),
+            embedding      vector(1536),
+            token_count    INTEGER NOT NULL DEFAULT 0
+        )
+    """)
+    op.execute("CREATE INDEX IF NOT EXISTS ix_document_chunks_document_id ON document_chunks (document_id)")
+    # IVFFlat cosine similarity index for RAG retrieval.
+    op.execute("""
+        CREATE INDEX IF NOT EXISTS ix_document_chunks_embedding
+        ON document_chunks USING ivfflat (embedding vector_cosine_ops) WITH (lists = 100)
+    """)
+    # GIN full-text search index for BM25-style hybrid retrieval.
+    op.execute("""
+        CREATE INDEX IF NOT EXISTS ix_document_chunks_fts
+        ON document_chunks USING gin(to_tsvector('english', content))
+    """)
 
-    # ── alerts ────────────────────────────────────────────────────────────────
-    op.create_table(
-        "alerts",
-        sa.Column("id", sa.Integer(), autoincrement=True, nullable=False),
-        sa.Column("user_id", sa.Integer(), sa.ForeignKey("users.id", ondelete="CASCADE"), nullable=False),
-        sa.Column("symbol", sa.String(50), nullable=False),
-        sa.Column(
-            "condition",
-            sa.Enum(
-                "pct_move", "price_above", "price_below", "filing", "earnings", "news",
-                name="alert_condition_enum",
-                create_type=False,
-            ),
-            nullable=False,
-        ),
-        sa.Column("threshold", sa.Float(), nullable=True),
-        sa.Column("description", sa.Text(), nullable=True),
-        sa.Column("is_active", sa.Boolean(), nullable=False, server_default="true"),
-        sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
-        sa.Column("last_triggered_at", sa.DateTime(timezone=True), nullable=True),
-        sa.PrimaryKeyConstraint("id"),
-    )
-    op.create_index("ix_alerts_user_id_is_active", "alerts", ["user_id", "is_active"])
+    # ── alerts ──────────────────────────────────────────────────────────────────
+    op.execute("""
+        CREATE TABLE IF NOT EXISTS alerts (
+            id                SERIAL PRIMARY KEY,
+            user_id           INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+            symbol            VARCHAR(50) NOT NULL,
+            condition         alert_condition_enum NOT NULL,
+            threshold         FLOAT,
+            description       TEXT,
+            is_active         BOOLEAN NOT NULL DEFAULT TRUE,
+            created_at        TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            last_triggered_at TIMESTAMPTZ
+        )
+    """)
+    op.execute("CREATE INDEX IF NOT EXISTS ix_alerts_user_id_is_active ON alerts (user_id, is_active)")
 
-    # ── integrations ──────────────────────────────────────────────────────────
-    op.create_table(
-        "integrations",
-        sa.Column("id", sa.Integer(), autoincrement=True, nullable=False),
-        sa.Column("user_id", sa.Integer(), sa.ForeignKey("users.id", ondelete="CASCADE"), nullable=False),
-        sa.Column(
-            "provider",
-            sa.Enum("google", name="integration_provider_enum", create_type=False),
-            nullable=False,
-        ),
-        sa.Column("access_token_encrypted", sa.Text(), nullable=False),
-        sa.Column("refresh_token_encrypted", sa.Text(), nullable=True),
-        sa.Column("scope", sa.Text(), nullable=True),
-        sa.Column("expires_at", sa.DateTime(timezone=True), nullable=True),
-        sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
-        sa.Column("updated_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
-        sa.PrimaryKeyConstraint("id"),
-        sa.UniqueConstraint("user_id", "provider", name="uq_integrations_user_id_provider"),
-    )
+    # ── integrations ────────────────────────────────────────────────────────────
+    op.execute("""
+        CREATE TABLE IF NOT EXISTS integrations (
+            id                       SERIAL PRIMARY KEY,
+            user_id                  INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+            provider                 integration_provider_enum NOT NULL,
+            access_token_encrypted   TEXT NOT NULL,
+            refresh_token_encrypted  TEXT,
+            scope                    TEXT,
+            expires_at               TIMESTAMPTZ,
+            created_at               TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            updated_at               TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            CONSTRAINT uq_integrations_user_id_provider UNIQUE (user_id, provider)
+        )
+    """)
 
-    # ── notifications_log ─────────────────────────────────────────────────────
-    op.create_table(
-        "notifications_log",
-        sa.Column("id", sa.Integer(), autoincrement=True, nullable=False),
-        sa.Column("user_id", sa.Integer(), sa.ForeignKey("users.id", ondelete="CASCADE"), nullable=False),
-        sa.Column("alert_id", sa.Integer(), sa.ForeignKey("alerts.id", ondelete="SET NULL"), nullable=True),
-        sa.Column("content_hash", sa.String(64), nullable=False),
-        sa.Column("sent_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
-        sa.Column("notification_type", sa.String(50), nullable=False),
-        sa.Column("content_preview", sa.String(500), nullable=True),
-        sa.PrimaryKeyConstraint("id"),
-        sa.UniqueConstraint("content_hash", name="uq_notifications_log_content_hash"),
-    )
-    op.create_index("ix_notifications_log_user_id", "notifications_log", ["user_id"])
+    # ── notifications_log ───────────────────────────────────────────────────────
+    op.execute("""
+        CREATE TABLE IF NOT EXISTS notifications_log (
+            id                SERIAL PRIMARY KEY,
+            user_id           INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+            alert_id          INTEGER REFERENCES alerts(id) ON DELETE SET NULL,
+            content_hash      VARCHAR(64) NOT NULL,
+            sent_at           TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            notification_type VARCHAR(50) NOT NULL,
+            content_preview   VARCHAR(500),
+            CONSTRAINT uq_notifications_log_content_hash UNIQUE (content_hash)
+        )
+    """)
+    op.execute("CREATE INDEX IF NOT EXISTS ix_notifications_log_user_id ON notifications_log (user_id)")
 
-    # ── reminders ─────────────────────────────────────────────────────────────
-    op.create_table(
-        "reminders",
-        sa.Column("id", sa.Integer(), autoincrement=True, nullable=False),
-        sa.Column("user_id", sa.Integer(), sa.ForeignKey("users.id", ondelete="CASCADE"), nullable=False),
-        sa.Column("description", sa.Text(), nullable=False),
-        sa.Column("remind_at", sa.DateTime(timezone=True), nullable=False),
-        sa.Column("related_entity", sa.String(100), nullable=True),
-        sa.Column(
-            "status",
-            sa.Enum("pending", "sent", "cancelled", name="reminder_status_enum", create_type=False),
-            nullable=False,
-            server_default="pending",
-        ),
-        sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
-        sa.PrimaryKeyConstraint("id"),
-    )
-    op.create_index("ix_reminders_user_id", "reminders", ["user_id"])
-    op.create_index("ix_reminders_remind_at", "reminders", ["remind_at"])
+    # ── reminders ───────────────────────────────────────────────────────────────
+    op.execute("""
+        CREATE TABLE IF NOT EXISTS reminders (
+            id             SERIAL PRIMARY KEY,
+            user_id        INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+            description    TEXT NOT NULL,
+            remind_at      TIMESTAMPTZ NOT NULL,
+            related_entity VARCHAR(100),
+            status         reminder_status_enum NOT NULL DEFAULT 'pending',
+            created_at     TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        )
+    """)
+    op.execute("CREATE INDEX IF NOT EXISTS ix_reminders_user_id ON reminders (user_id)")
+    op.execute("CREATE INDEX IF NOT EXISTS ix_reminders_remind_at ON reminders (remind_at)")
 
 
 def downgrade() -> None:
-    op.drop_table("reminders")
-    op.drop_table("notifications_log")
-    op.drop_table("integrations")
-    op.drop_table("alerts")
-    op.drop_table("document_chunks")
-    op.drop_table("documents")
-    op.drop_table("research_history")
-    op.drop_table("memory_facts")
-    op.drop_table("conversation_summaries")
-    op.drop_table("messages")
-    op.drop_table("conversations")
-    op.drop_table("watchlist_items")
-    op.drop_table("user_preferences")
-    op.drop_table("users")
+    op.execute("DROP TABLE IF EXISTS reminders CASCADE")
+    op.execute("DROP TABLE IF EXISTS notifications_log CASCADE")
+    op.execute("DROP TABLE IF EXISTS integrations CASCADE")
+    op.execute("DROP TABLE IF EXISTS alerts CASCADE")
+    op.execute("DROP TABLE IF EXISTS document_chunks CASCADE")
+    op.execute("DROP TABLE IF EXISTS documents CASCADE")
+    op.execute("DROP TABLE IF EXISTS research_history CASCADE")
+    op.execute("DROP TABLE IF EXISTS memory_facts CASCADE")
+    op.execute("DROP TABLE IF EXISTS conversation_summaries CASCADE")
+    op.execute("DROP TABLE IF EXISTS messages CASCADE")
+    op.execute("DROP TABLE IF EXISTS conversations CASCADE")
+    op.execute("DROP TABLE IF EXISTS watchlist_items CASCADE")
+    op.execute("DROP TABLE IF EXISTS user_preferences CASCADE")
+    op.execute("DROP TABLE IF EXISTS users CASCADE")
 
     op.execute("DROP TYPE IF EXISTS reminder_status_enum")
     op.execute("DROP TYPE IF EXISTS integration_provider_enum")

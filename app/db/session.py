@@ -45,6 +45,9 @@ def _get_engine() -> AsyncEngine:
             max_overflow=settings.database_max_overflow,
             pool_pre_ping=True,  # detect stale connections before use
             echo=settings.is_development,  # log SQL in development only
+            # Required for Supabase PgBouncer (transaction mode):
+            # PgBouncer in transaction mode does not support prepared statements.
+            connect_args={"statement_cache_size": 0},
         )
         logger.info("database_engine_created", pool_size=settings.database_pool_size)
     return _engine

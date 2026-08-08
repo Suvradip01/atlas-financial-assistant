@@ -56,6 +56,7 @@ class Settings(BaseSettings):
     # ── LLM / AI ─────────────────────────────────────────────────────────────
     llm_provider: Literal["openai", "anthropic", "google"] = "openai"
     openai_api_key: SecretStr | None = None
+    google_api_key: SecretStr | None = None
 
     # Model tiers — names resolved by ModelRouter, so switching providers
     # is a single env-var change, not a code change.
@@ -83,7 +84,7 @@ class Settings(BaseSettings):
     mcp_google_workspace_url: str = "http://mcp-google-workspace:3000"
 
     # ── File Storage ──────────────────────────────────────────────────────────
-    storage_backend: Literal["local", "s3"] = "local"
+    storage_backend: Literal["local", "s3", "cloudinary"] = "local"
     storage_local_path: Path = Path("/app/data/uploads")
     storage_max_file_size_mb: int = Field(default=50, ge=1, le=500)
 
@@ -92,6 +93,11 @@ class Settings(BaseSettings):
     aws_secret_access_key: SecretStr | None = None
     aws_s3_bucket: str | None = None
     aws_s3_region: str = "us-east-1"
+
+    # Cloudinary (optional — only needed if storage_backend = "cloudinary")
+    cloudinary_cloud_name: str | None = None
+    cloudinary_api_key: str | None = None
+    cloudinary_api_secret: SecretStr | None = None
 
     # ── Whisper ───────────────────────────────────────────────────────────────
     whisper_api_key: SecretStr | None = None
@@ -136,12 +142,23 @@ class Settings(BaseSettings):
                 raise ValueError(
                     f"S3 storage requires: {', '.join(missing)}"
                 )
+        if self.storage_backend == "cloudinary":
+            missing_cloud = [
+                f for f in ["cloudinary_cloud_name", "cloudinary_api_key", "cloudinary_api_secret"]
+                if not getattr(self, f)
+            ]
+            if missing_cloud:
+                raise ValueError(
+                    f"Cloudinary storage requires: {', '.join(missing_cloud)}"
+                )
         return self
 
     @model_validator(mode="after")
     def validate_llm_config(self) -> "Settings":
         if self.llm_provider == "openai" and not self.openai_api_key:
             raise ValueError("openai_api_key is required when llm_provider=openai")
+        if self.llm_provider == "google" and not self.google_api_key:
+            raise ValueError("google_api_key is required when llm_provider=google")
         return self
 
 
